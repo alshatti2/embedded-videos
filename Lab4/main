@@ -1,0 +1,92 @@
+#include "arm_book_lib.h"
+
+DigitalOut signalLight(LED1);
+
+UnbufferedSerial pcPort(USBTX, USBRX, 115200);
+
+int gasFlag = 0;
+int tempFlag = 0;
+
+void setupPins();
+void checkSerialCommands();
+void printHelpMenu();
+
+int main() {
+    setupPins();
+    while (true) {
+        checkSerialCommands();
+    }
+}
+
+void setupPins() {
+    signalLight = 0;
+}
+
+void checkSerialCommands() {
+    char keyInput = '\0';
+    
+    if (pcPort.readable()) {
+        pcPort.read(&keyInput, 1);
+        
+        if (keyInput == '1') {
+            gasFlag = !gasFlag;
+            if (gasFlag == 1) {
+                const char* txt = "Gas Alarm is now ON\r\n";
+                pcPort.write(txt, strlen(txt));
+            } else {
+                const char* txt = "Gas Alarm is now OFF\r\n";
+                pcPort.write(txt, strlen(txt));
+            }
+        } 
+        else if (keyInput == '2') {
+            if (gasFlag == 1) {
+                const char* txt = "Current Gas State: ACTIVE\r\n";
+                pcPort.write(txt, strlen(txt));
+            } else {
+                const char* txt = "Current Gas State: CLEAR\r\n";
+                pcPort.write(txt, strlen(txt));
+            }
+        } 
+        else if (keyInput == '3') {
+            tempFlag = !tempFlag;
+            if (tempFlag == 1) {
+                const char* txt = "Temperature Alarm is now ON\r\n";
+                pcPort.write(txt, strlen(txt));
+            } else {
+                const char* txt = "Temperature Alarm is now OFF\r\n";
+                pcPort.write(txt, strlen(txt));
+            }
+        } 
+        else if (keyInput == '4') {
+            if (tempFlag == 1) {
+                const char* txt = "Current Temp State: ACTIVE\r\n";
+                pcPort.write(txt, strlen(txt));
+            } else {
+                const char* txt = "Current Temp State: CLEAR\r\n";
+                pcPort.write(txt, strlen(txt));
+            }
+        } 
+        else {
+            printHelpMenu();
+        }
+        
+        if (gasFlag == 1 || tempFlag == 1) {
+            signalLight = 1;
+        } else {
+            signalLight = 0;
+        }
+    }
+}
+
+void printHelpMenu() {
+    const char* m1 = "--- Control Menu ---\r\n";
+    pcPort.write(m1, strlen(m1));
+    const char* m2 = "Press '1' to flip gas\r\n";
+    pcPort.write(m2, strlen(m2));
+    const char* m3 = "Press '2' for gas status\r\n";
+    pcPort.write(m3, strlen(m3));
+    const char* m4 = "Press '3' to flip temp\r\n";
+    pcPort.write(m4, strlen(m4));
+    const char* m5 = "Press '4' for temp status\r\n\r\n";
+    pcPort.write(m5, strlen(m5));
+}
