@@ -1,0 +1,224 @@
+#include "mbed.h"
+
+DigitalIn swA(D2);
+DigitalIn swB(D3);
+DigitalIn swC(D4);
+DigitalIn swD(D5);
+
+DigitalOut accessLed(LED1);
+DigitalOut secondaryLed(LED2);
+DigitalOut alertLed(LED3);
+
+UnbufferedSerial serialPort(USBTX, USBRX, 115200);
+
+int getButtonPress() {
+    if (swA.read() == 1) {
+        ThisThread::sleep_for(25);
+        if (swA.read() == 1) {
+            serialPort.write("[DEBUG] Button 1 Pressed\r\n", 26);
+            while (swA.read() == 1);
+            return 1;
+        }
+    }
+    if (swB.read() == 1) {
+        ThisThread::sleep_for(25);
+        if (swB.read() == 1) {
+            serialPort.write("[DEBUG] Button 2 Pressed\r\n", 26);
+            while (swB.read() == 1);
+            return 2;
+        }
+    }
+    if (swC.read() == 1) {
+        ThisThread::sleep_for(25);
+        if (swC.read() == 1) {
+            serialPort.write("[DEBUG] Button 3 Pressed\r\n", 26);
+            while (swC.read() == 1);
+            return 3;
+        }
+    }
+    if (swD.read() == 1) {
+        ThisThread::sleep_for(25);
+        if (swD.read() == 1) {
+            serialPort.write("[DEBUG] Button 0 Pressed\r\n", 26);
+            while (swD.read() == 1);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int main() {
+    swA.mode(PullDown);
+    swB.mode(PullDown);
+    swC.mode(PullDown);
+    swD.mode(PullDown);
+
+    accessLed = 0;
+    secondaryLed = 0;
+    alertLed = 1;
+
+    serialPort.write("=== SECURITY SYSTEM INITIALIZED ===\r\n", 37);
+    serialPort.write("[STATUS] Ready for Passcode Input...\r\n", 38);
+
+    int failedAttempts = 0;
+    int isWarningActive = 0;
+
+    int masterCode[3] = {1, 2, 3};
+    int masterAdmin[3] = {0, 0, 0};
+    int userTyped[3] = {-1, -1, -1};
+
+    Timer mainClock;
+    Timer flashClock;
+
+    while (true) {
+        int keysCollected = 0;
+
+        while (keysCollected < 3) {
+            int currentKey = getButtonPress();
+            if (currentKey != -1) {
+                userTyped[keysCollected] = currentKey;
+                keysCollected++;
+                
+                char debugMsg[40];
+                sprintf(debugMsg, "[INPUT] Digit %d recorded: %d\r\n", keysCollected, currentKey);
+                serialPort.write(debugMsg, strlen(debugMsg));
+            }
+            ThisThread::sleep_for(10);
+        }
+
+        serialPort.write("[PROCESSING] Verifying Passcode...\r\n", 36);
+
+        int codeIsValid = 1;
+        for (int j = 0; j < 3; j++) {
+            if (userTyped[j] != masterCode[j]) {
+                codeIsValid = 0;
+            }
+        }
+
+        if (codeIsValid == 1) {
+            serialPort.write("[SUCCESS] Passcode Correct. Access Granted!\r\n", 45);
+            failedAttempts = 0;
+            isWarningActive = 0;
+            alertLed = 0;
+            accessLed = 1;
+            ThisThread::sleep_for(5000);
+            accessLed = 0;
+            alertLed = 1;
+            serialPort.write("[STATUS] Door Locked. Standing by...\r\n", 38);
+        } else {
+            if (isWarningActive == 1) {
+                failedAttempts = 3;
+            } else {
+                failedAttempts++;
+            }
+            isWarningActive = 0;
+
+            char failMsg[50];
+            sprintf(failMsg, "[WARNING] Invalid Passcode! Failed Attempts: %d\r\n", failedAttempts);
+            serialPort.write(failMsg, strlen(failMsg));
+
+            if (failedAttempts == 2) {
+                serialPort.write("[ALERT] 2 Consecutive Failures! Triggering Warning Mode (10s Lockout)\r\n", 71);
+                for (int i = 0; i < 20; i++) {
+                    alertLed = !alertLed;
+                    ThisThread::sleep_for(500);
+                }
+                alertLed = 1;
+                isWarningActive = 1;
+                serialPort.write("[STATUS] Warning Mode Expired. Inputs Unblocked.\r\n", 50);
+            } 
+            else if (failedAttempts >= 3) {
+                serialPort.write("[CRITICAL] 3 Failures! System Entering Lockdown (2 Minutes)\r\n", 61);
+                secondaryLed = 1;
+                isWarningActive = 0;
+
+                int rootCollected = 0;
+                int rootTyped[3] = {-1, -1, -1};
+
+                mainClock.reset();
+                mainClock.start();
+                flashClock.reset();
+                flashClock.start();
+
+                int lastLoggedSecond = 0;
+
+                while (chrono::duration_cast<chrono::seconds>(mainClock.elapsed_time()).count() < 120) {
+                    int currentSeconds = chrono::duration_cast<chrono::seconds>(mainClock.elapsed_time()).count();
+                    
+                    if (currentSeconds != lastLoggedSecond && currentSeconds % 10 == 0) {
+                        char timeMsg[50];
+                        sprintf(timeMsg, "[LOCKDOWN TIMEOUT] Remaining: %d seconds\r\n", 120 - currentSeconds);
+                        serialPort.write(timeMsg, strlen(timeMsg));
+                        lastLoggedSecond = currentSeconds;
+                    }
+
+                    if (chrono::duration_cast<chrono::milliseconds>(flashClock.elapsed_time()).count() >= 500) {
+                        alertLed = !alertLed;
+                        flashClock.reset();
+                    }
+
+                    int quickKey = -1;
+                    if (swA.read() == 1) {
+                        quickKey = 1;
+                    } else if (swB.read() == 1) {
+                        quickKey = 2;
+                    } else if (swC.read() == 1) {
+                        quickKey = 3;
+                    } else if (swD.read() == 1) {
+                        quickKey = 0;
+                    }
+
+                    if (quickKey != -1) {
+                        ThisThread::sleep_for(25);
+                        while (swA.read() == 1 || swB.read() == 1 || swC.read() == 1 || swD.read() == 1);
+
+                        serialPort.write("[ADMIN ATTEMPT] Detecting Override Keypad Input...\r\n", 52);
+                        rootTyped[0] = quickKey;
+                        rootCollected = 1;
+
+                        char adminKeyMsg[40];
+                        sprintf(adminKeyMsg, "[ADMIN INPUT] Digit 1: %d\r\n", quickKey);
+                        serialPort.write(adminKeyMsg, strlen(adminKeyMsg));
+
+                        while (rootCollected < 3) {
+                            int nextKey = getButtonPress();
+                            if (nextKey != -1) {
+                                rootTyped[rootCollected] = nextKey;
+                                rootCollected++;
+                                
+                                char nextAdminMsg[40];
+                                sprintf(nextAdminMsg, "[ADMIN INPUT] Digit %d: %d\r\n", rootCollected, nextKey);
+                                serialPort.write(nextAdminMsg, strlen(nextAdminMsg));
+                            }
+                            ThisThread::sleep_for(10);
+                        }
+
+                        int adminIsValid = 1;
+                        for (int n = 0; n < 3; n++) {
+                            if (rootTyped[n] != masterAdmin[n]) {
+                                adminIsValid = 0;
+                            }
+                        }
+
+                        if (adminIsValid == 1) {
+                            serialPort.write("[OVERRIDE] Admin Code Correct! Resetting Lockdown.\r\n", 53);
+                            failedAttempts = 0;
+                            break;
+                        } else {
+                            serialPort.write("[SECURITY ERROR] Wrong Admin Code! Input Rejected.\r\n", 52);
+                            rootCollected = 0;
+                        }
+                    }
+                    ThisThread::sleep_for(10);
+                }
+
+                mainClock.stop();
+                flashClock.stop();
+                secondaryLed = 0;
+                alertLed = 1;
+                serialPort.write("[STATUS] Lockdown Concluded. System Reset.\r\n", 44);
+            }
+        }
+        ThisThread::sleep_for(50);
+    }
+}
